@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Programming Assignment 1: Disk Storage and Buffer Manager</title>
+    <style>
+        body {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            max-width: 8.5in;
+            margin: 1in auto;
+            padding: 0 0.5in;
+        }
+        h1 {
+            font-size: 16pt;
+            text-align: center;
+            margin-bottom: 5pt;
+        }
+        h2 {
+            font-size: 14pt;
+            margin-top: 18pt;
+            margin-bottom: 6pt;
+            border-bottom: 1px solid #000;
+        }
+        h3 {
+            font-size: 12pt;
+            margin-top: 12pt;
+            margin-bottom: 6pt;
+        }
+        .header-info {
+            text-align: center;
+            margin-bottom: 20pt;
+        }
+        .header-info p {
+            margin: 2pt 0;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10pt 0;
+        }
+        th, td {
+            border: 1px solid #000;
+            padding: 6pt 10pt;
+            text-align: left;
+        }
+        th {
+            background-color: #f0f0f0;
+        }
+        code {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 10pt;
+            background-color: #f5f5f5;
+            padding: 1pt 3pt;
+        }
+        pre {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 10pt;
+            background-color: #f5f5f5;
+            padding: 10pt;
+            border: 1px solid #ddd;
+            overflow-x: auto;
+        }
+        .important {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10pt;
+            margin: 10pt 0;
+        }
+        ul, ol {
+            margin: 6pt 0;
+            padding-left: 25pt;
+        }
+        li {
+            margin: 3pt 0;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Advanced Database Organization</h1>
+<h1>Programming Assignment 1 (PA1): Disk Storage and Buffer Manager</h1>
+
+<div class="header-info">
+    <p><strong>Due:</strong> TBD</p>
+    <p><strong>Chapters:</strong> 12 - 13</p>
+    <p><strong>Language:</strong> C</p>
+    <p><strong>Duration:</strong> 2 weeks</p>
+    <p><strong>Weight:</strong> 15%</p>
+    <p><strong>Collaboration:</strong> Pairs allowed (maximum 2 students)</p>
+</div>
+
+<h2>1. Learning Objectives</h2>
+<p>By completing this assignment, students will be able to:</p>
+<ul>
+    <li>Implement disk-based page storage</li>
+    <li>Design and manage an in-memory buffer pool</li>
+    <li>Apply the Least Recently Used (LRU) replacement strategy</li>
+    <li>Safely manage dynamic memory in C</li>
+    <li>Understand why buffer management is critical for DBMS performance</li>
+</ul>
+
+<h2>2. Problem Overview</h2>
+<p>Modern database systems manage disk pages and memory buffers explicitly rather than relying on the operating system's paging mechanisms. In this assignment, you will implement:</p>
+<ul>
+    <li>A <strong>Storage Manager</strong> that manages fixed-size pages on disk</li>
+    <li>A <strong>Buffer Manager</strong> that caches disk pages in memory using an <strong>LRU replacement policy</strong></li>
+</ul>
+<p>Each page is <strong>4096 bytes</strong> and is stored in a database file.</p>
+<p><em>Extra credit is available for implementing alternative replacement strategies (e.g., CLOCK, LRU-K).</em></p>
+
+<h2>3. System Architecture</h2>
+<p>You will implement the Storage Manager and Buffer Manager components shown below:</p>
+<pre>
+   Client (Test Driver)
+          |
+          v
+   +----------------+
+   | Buffer Manager |  &lt;- Caches pages in memory (LRU)
+   +----------------+
+          |
+          v
+   +----------------+
+   | Storage Manager|  &lt;- Reads/writes pages to disk
+   +----------------+
+          |
+          v
+      Page File (4096 bytes per page)
+</pre>
+<ul>
+    <li>The <strong>Storage Manager</strong> handles disk I/O</li>
+    <li>The <strong>Buffer Manager</strong> caches pages in memory</li>
+    <li>The <strong>Client</strong> (test driver) interacts only with the Buffer Manager</li>
+</ul>
+
+<h2>4. Specifications</h2>
+
+<h3>4.1 Page Format</h3>
+<ul>
+    <li>Page size: <strong>4096 bytes</strong></li>
+    <li>Pages are identified by a <strong>0-based page number</strong></li>
+    <li>Pages are always read and written <strong>in full</strong></li>
+</ul>
+
+<h3>4.2 Storage Manager (SM)</h3>
+<p>The Storage Manager is responsible for reading and writing disk pages.</p>
+
+<h4>Required Functions</h4>
+<pre>
+/* Initialization */
+void initStorageManager(void);
+
+/* File Operations */
+RC createPageFile(char *fileName);
+RC openPageFile(char *fileName, SM_FileHandle *fHandle);
+RC closePageFile(SM_FileHandle *fHandle);
+RC destroyPageFile(char *fileName);
+
+/* Reading Blocks */
+RC readBlock(int pageNum, SM_FileHandle *fHandle, SM_PageHandle memPage);
+int getBlockPos(SM_FileHandle *fHandle);
+RC readFirstBlock(SM_FileHandle *fHandle, SM_PageHandle memPage);
+RC readPreviousBlock(SM_FileHandle *fHandle, SM_PageHandle memPage);
+RC readCurrentBlock(SM_FileHandle *fHandle, SM_PageHandle memPage);
+RC readNextBlock(SM_FileHandle *fHandle, SM_PageHandle memPage);
+RC readLastBlock(SM_FileHandle *fHandle, SM_PageHandle memPage);
+
+/* Writing Blocks */
+RC writeBlock(int pageNum, SM_FileHandle *fHandle, SM_PageHandle memPage);
+RC writeCurrentBlock(SM_FileHandle *fHandle, SM_PageHandle memPage);
+RC appendEmptyBlock(SM_FileHandle *fHandle);
+RC ensureCapacity(int numberOfPages, SM_FileHandle *fHandle);
+</pre>
+
+<h4>Metadata to Maintain (SM_FileHandle)</h4>
+<ul>
+    <li>File name</li>
+    <li>Total number of pages in the file</li>
+    <li>Current page position</li>
+    <li>Management info (file pointer or descriptor)</li>
+</ul>
+
+<h4>Requirements</h4>
+<ul>
+    <li>Create the file if it does not exist (with one empty page)</li>
+    <li>Automatically extend the file when writing new pages</li>
+    <li>Use <code>fseek</code>, <code>fread</code>, and <code>fwrite</code> for file operations</li>
+</ul>
+
+<h3>4.3 Buffer Manager (BM)</h3>
+<p>The Buffer Manager caches disk pages in memory.</p>
+
+<h4>Buffer Pool</h4>
+<ul>
+    <li>Fixed number of frames (configurable, e.g., 5)</li>
+    <li>Each frame holds exactly one page</li>
+</ul>
+
+<h4>Frame Metadata</h4>
+<ul>
+    <li>Page number (which page is in this frame)</li>
+    <li>Dirty bit (has the page been modified?)</li>
+    <li>Pin count (fix count - how many clients are using this page)</li>
+    <li>LRU counter or equivalent tracking mechanism</li>
+</ul>
+
+<h4>Required Functions</h4>
+<pre>
+/* Pool Handling */
+RC initBufferPool(BM_BufferPool *const bm, const char *const pageFileName,
+                  const int numPages, ReplacementStrategy strategy,
+                  void *stratData);
+RC shutdownBufferPool(BM_BufferPool *const bm);
+RC forceFlushPool(BM_BufferPool *const bm);
+
+/* Page Access */
+RC pinPage(BM_BufferPool *const bm, BM_PageHandle *const page,
+           const PageNumber pageNum);
+RC unpinPage(BM_BufferPool *const bm, BM_PageHandle *const page);
+RC markDirty(BM_BufferPool *const bm, BM_PageHandle *const page);
+RC forcePage(BM_BufferPool *const bm, BM_PageHandle *const page);
+
+/* Statistics */
+PageNumber *getFrameContents(BM_BufferPool *const bm);
+bool *getDirtyFlags(BM_BufferPool *const bm);
+int *getFixCounts(BM_BufferPool *const bm);
+int getNumReadIO(BM_BufferPool *const bm);
+int getNumWriteIO(BM_BufferPool *const bm);
+</pre>
+
+<h3>4.4 Replacement Policy</h3>
+<div class="important">
+    <strong>IMPORTANT:</strong>
+    <ul>
+        <li>Use <strong>Least Recently Used (LRU)</strong> replacement policy</li>
+        <li><strong>Pinned pages must NOT be evicted</strong> (fixCount > 0)</li>
+        <li><strong>Dirty pages MUST be written back to disk BEFORE eviction</strong></li>
+        <li><strong>Update LRU timestamp on EVERY pin operation</strong> (not just when loading from disk)</li>
+    </ul>
+</div>
+
+<h3>4.5 Statistics Functions</h3>
+<p>Implement functions that return statistics about:</p>
+<ul>
+    <li><code>getFrameContents</code>: Returns array of page numbers in each frame (NO_PAGE for empty)</li>
+    <li><code>getDirtyFlags</code>: Returns array of dirty flags for each frame</li>
+    <li><code>getFixCounts</code>: Returns array of fix counts for each frame</li>
+    <li><code>getNumReadIO</code>: Returns total number of pages read from disk</li>
+    <li><code>getNumWriteIO</code>: Returns total number of pages written to disk</li>
+</ul>
+
+<h2>5. Error Handling</h2>
+<p>Your implementation must correctly handle:</p>
+<ul>
+    <li>Invalid page IDs</li>
+    <li>Attempts to evict pinned pages</li>
+    <li>Disk I/O failures</li>
+    <li>Memory allocation failures</li>
+    <li><strong>No memory leaks</strong> (verified using Valgrind)</li>
+</ul>
+
+<h2>6. Testing Requirements</h2>
+<p>You must demonstrate:</p>
+<ul>
+    <li>Reading and writing <strong>at least 100 pages</strong></li>
+    <li>Correct LRU eviction order</li>
+    <li>Dirty pages written back to disk correctly</li>
+    <li><strong>Zero memory leaks</strong></li>
+</ul>
+
+<h2>7. Starter Code (Provided)</h2>
+<p>The following files are provided:</p>
+
+<h4>Header Files (DO NOT MODIFY)</h4>
+<ul>
+    <li><code>storage_mgr.h</code> - Storage Manager interface</li>
+    <li><code>buffer_mgr.h</code> - Buffer Manager interface</li>
+    <li><code>dberror.h</code> - Error codes and macros</li>
+    <li><code>dt.h</code> - Data types</li>
+    <li><code>test_helper.h</code> - Testing utilities</li>
+</ul>
+
+<h4>Implementation Files (YOUR CODE)</h4>
+<ul>
+    <li><code>storage_mgr.c</code> - Implement Storage Manager here</li>
+    <li><code>buffer_mgr.c</code> - Implement Buffer Manager here</li>
+</ul>
+
+<h4>Helper Files (PROVIDED)</h4>
+<ul>
+    <li><code>dberror.c</code> - Error handling implementation</li>
+    <li><code>buffer_mgr_stat.c</code> - Statistics helper functions</li>
+</ul>
+
+<h2>8. Deliverables</h2>
+<p>Submit a <strong>ZIP file</strong> containing:</p>
+<ul>
+    <li><code>storage_mgr.c</code></li>
+    <li><code>buffer_mgr.c</code></li>
+</ul>
+<p><strong>Do NOT include:</strong> header files, test files, binaries, object files, or documentation.</p>
+
+<h2>9. Grading Rubric (100 points)</h2>
+<table>
+    <tr>
+        <th>Category</th>
+        <th>Points</th>
+    </tr>
+    <tr>
+        <td>Storage Manager correctness</td>
+        <td>25</td>
+    </tr>
+    <tr>
+        <td>Buffer Manager correctness</td>
+        <td>35</td>
+    </tr>
+    <tr>
+        <td>LRU replacement</td>
+        <td>20</td>
+    </tr>
+    <tr>
+        <td>Testing &amp; robustness</td>
+        <td>10</td>
+    </tr>
+    <tr>
+        <td>Memory safety (Valgrind)</td>
+        <td>10</td>
+    </tr>
+    <tr>
+        <th>Total</th>
+        <th>100</th>
+    </tr>
+</table>
+
+<h2>10. Optional Bonus (+5 points)</h2>
+<ul>
+    <li>CLOCK replacement policy implementation</li>
+    <li>Buffer hit/miss statistics</li>
+</ul>
+
+<h2>11. Late Policy</h2>
+<ul>
+    <li>10% penalty per day</li>
+    <li>Up to 3 days late</li>
+    <li>No submissions accepted after 3 days</li>
+</ul>
+
+<h2>12. Academic Integrity</h2>
+<ul>
+    <li>Pairs allowed (max 2 students)</li>
+    <li>Both names must appear in submission</li>
+    <li>Code similarity detection will be used</li>
+</ul>
+
+<h2>13. Common Mistakes to Avoid</h2>
+<div class="important">
+    <ol>
+        <li><strong>Not updating LRU on re-pin</strong> (costs 5-10 points)
+            <ul><li>Must update timestamp when pinning an already-buffered page</li></ul>
+        </li>
+        <li><strong>Not writing dirty pages on eviction</strong> (costs 10-20 points)
+            <ul><li>Always check and write dirty pages before replacing</li></ul>
+        </li>
+        <li><strong>Memory leaks</strong> (costs 10 points)
+            <ul><li>Free all allocated memory in shutdown</li>
+            <li>Use Valgrind: <code>valgrind --leak-check=full ./test</code></li></ul>
+        </li>
+        <li><strong>Evicting pinned pages</strong> (costs 5 points)
+            <ul><li>Only evict pages with fixCount == 0</li></ul>
+        </li>
+        <li><strong>Not handling 100+ pages</strong> (costs 5-10 points)
+            <ul><li>Test with large files, small buffer pools</li></ul>
+        </li>
+    </ol>
+</div>
+
+<h2>14. Building and Testing</h2>
+<pre>
+# Build all
+make
+
+# Run storage tests
+make test-storage
+
+# Run buffer tests
+make test-buffer
+
+# Run all tests
+make test
+
+# Memory check with Valgrind
+make memcheck-storage
+make memcheck-buffer
+
+# Clean build files
+make clean
+</pre>
+
+<hr>
+<p style="text-align: center;"><em>Good luck!</em></p>
+
+</body>
+</html>
